@@ -1,0 +1,29 @@
+name: Check ITS Availability
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 5分ごとに実行
+  workflow_dispatch:         # 手動実行も可能
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install playwright requests
+          playwright install chromium
+
+      - name: Run checker
+        run: python check_its.py
+        env:
+          LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
