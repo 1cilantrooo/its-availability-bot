@@ -1,0 +1,4 @@
+﻿auth_state.json
+auth_state.b64
+.venv/
+__pycache__/
