@@ -367,7 +367,7 @@ def main():
     with sync_playwright() as p:
         print("[DEBUG] playwright started", flush=True)
         # デバッグ中は headless=False のままでOK。常時運用は True 推奨。
-        browser = p.chromium.launch(headless=False, slow_mo=200)
+        browser = p.chromium.launch(headless=True, slow_mo=0)
         print("[DEBUG] browser launched", flush=True)
         context = browser.new_context(storage_state="auth_state.json")
         print("[DEBUG] context created", flush=True)
@@ -433,3 +433,93 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# === 前提: 作業フォルダへ ===
+cd C:\work\aidemy_local
+
+# === 1) ワークフロー(5分おき)を書き出し ===
+New-Item -ItemType Directory -Force -Path .github\workflows | Out-Null
+@"
+name: ITS vacancy check (every 5 min)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      LINE_ACCESS_TOKEN: \${{ secrets.LINE_ACCESS_TOKEN }}
+      LINE_USER_ID: \${{ secrets.LINE_USER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright (with deps)
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Restore auth_state.json from secret
+        shell: bash
+        run: |
+          echo "\${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
+          ls -l auth_state.json
+
+      - name: Run checker (headless)
+        run: |
+          python -u check_its.py
+
+      - name: Commit last_state.json if changed
+        if: always()
+        run: |
+          if [ -f last_state.json ]; then
+            if [ -n "$(git status --porcelain last_state.json)" ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add last_state.json
+              git commit -m "Update last_state.json [skip ci]"
+              git push
+            fi
+          fi
+"@ | Out-File -Encoding UTF8 .github\workflows\its-check.yml
+
+# requirements.txt が無ければ最小構成を書き出し
+if (-not (Test-Path .\requirements.txt)) {
+@"
+playwright==1.*
+requests==2.*
+"@ | Out-File -Encoding UTF8 requirements.txt
+}
+
+# === 2) Git 初期化＆最初のコミット ===
+git init
+git add .
+git commit -m "init (workflow + files)"
+
+# === 3) GitHub リポ作成＆push（ユーザー名固定：1cilantrooo） ===
+gh repo create 1cilantrooo/its-availability-bot --private --source . --remote origin --push
+
+# === 4) Secrets 登録（auth_state を Base64化して入れる／LINEは環境変数から）===
+$authB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("auth_state.json"))
+gh secret set AUTH_STATE_B64 -b $authB64
+if ($env:LINE_ACCESS_TOKEN) { gh secret set LINE_ACCESS_TOKEN -b "$env:LINE_ACCESS_TOKEN" }
+if ($env:LINE_USER_ID)      { gh secret set LINE_USER_ID      -b "$env:LINE_USER_ID" }
+
+Write-Host "`n セット完了。GitHub → Actions タブで実行状況を確認してね。5分おきに自動実行されます。"
