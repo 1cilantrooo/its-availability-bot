@@ -1,18 +1,19 @@
-name: ITS vacancy check (every 5 min)
+name: ITS vacancy check (every 2 min, debug)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # 5分おき（UTC）
-  workflow_dispatch: {}      # 手動実行もOK
+    - cron: "*/2 * * * *"
+  workflow_dispatch: {}
 
 permissions:
-  contents: write            # last_state.json をコミットする
+  contents: write
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
+      TZ: Asia/Tokyo
       LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
       LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
 
@@ -20,28 +21,71 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Show repo tree
+        run: |
+          pwd
+          ls -la
+          echo "---- .github/workflows ----"
+          ls -la .github/workflows || true
+
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Print Python env
+        run: |
+          python -V
+          python -c "import sys,platform; print('platform:', platform.platform()); print('executable:', sys.executable)"
+          python - << 'PY'
+from pathlib import Path
+for p in Path('.').glob('*.py'):
+    print(p, p.stat().st_size, 'bytes')
+PY
+
+      - name: Install system tzdata (for zoneinfo)
+        run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
+
+      - name: Install Python deps (explicit)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install "playwright==1.*" "requests==2.*"
 
-      - name: Install Playwright (with deps)
+      - name: Install Playwright browsers (with deps)
         run: |
           python -m playwright install --with-deps chromium
 
-      - name: Restore auth_state.json from secret
+      - name: Restore auth_state.json from secret (and verify)
         shell: bash
         run: |
+          set -euo pipefail
           echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
           ls -l auth_state.json
+          # 100バイト未満なら失敗扱い（空/壊れ）
+          if [ ! -s auth_state.json ] || [ $(wc -c < auth_state.json) -lt 100 ]; then
+            echo "auth_state.json looks empty/bad. Re-upload AUTH_STATE_B64." >&2
+            exit 1
+          fi
+          # 形式ざっくりチェック（JSONっぽいか）
+          head -c 1 auth_state.json | grep -q '{' || { echo "auth_state.json not JSON-like"; exit 1; }
+
+      - name: Sanity import & headless smoke
+        run: |
+          python - << 'PY'
+from playwright.sync_api import sync_playwright
+print("playwright import OK")
+with sync_playwright() as p:
+    b = p.chromium.launch(headless=True)
+    b.new_page().goto("https://example.com")
+    b.close()
+print("headless launch OK")
+PY
 
       - name: Run checker (headless)
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
+          set -x
           python -u check_its.py
 
       - name: Commit last_state.json if changed
@@ -56,3 +100,15 @@ jobs:
               git push
             fi
           fi
+
+      - name: Upload artifacts on failure (screens, logs)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: |
+            hits/*
+            auth_state.json
+            last_state.json
+            **/*.log
+          if-no-files-found: ignore
