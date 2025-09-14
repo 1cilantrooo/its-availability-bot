@@ -1,0 +1,58 @@
+name: ITS vacancy check (every 5 min)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 5分おき（UTC）
+  workflow_dispatch: {}      # 手動実行もOK
+
+permissions:
+  contents: write            # last_state.json をコミットする
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
+      LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright (with deps)
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Restore auth_state.json from secret
+        shell: bash
+        run: |
+          echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
+          ls -l auth_state.json
+
+      - name: Run checker (headless)
+        run: |
+          python -u check_its.py
+
+      - name: Commit last_state.json if changed
+        if: always()
+        run: |
+          if [ -f last_state.json ]; then
+            if [ -n "$(git status --porcelain last_state.json)" ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add last_state.json
+              git commit -m "Update last_state.json [skip ci]"
+              git push
+            fi
+          fi
