@@ -1,4 +1,5 @@
 ﻿auth_state.json
-auth_state.b64
+last_state.json
+hits/
+*.log
 .venv/
-__pycache__/
