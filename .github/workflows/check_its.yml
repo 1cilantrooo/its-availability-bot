@@ -1,5 +1,8 @@
 name: ITS vacancy check (simple)
-
+concurrency:
+  group: its-vacancy-check
+  cancel-in-progress: true
+  
 on:
   schedule:
     - cron: "*/5 * * * *"   # 5分ごと
@@ -11,7 +14,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     env:
       TZ: Asia/Tokyo
       LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
@@ -35,10 +38,13 @@ jobs:
       - name: Restore auth_state.json
         run: echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
 
-      - name: Run checker (headless)
+       - name: Run checker (headless)
+        timeout-minutes: 12
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -u check_its.py
+        run: |
+          set -x
+          python -u check_its.py
 
       - name: Commit last_state.json if changed
         if: always()
