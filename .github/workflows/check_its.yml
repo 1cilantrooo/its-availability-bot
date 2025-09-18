@@ -1,8 +1,9 @@
 name: ITS vacancy check (simple)
+
 concurrency:
   group: its-vacancy-check
   cancel-in-progress: true
-  
+
 on:
   schedule:
     - cron: "*/5 * * * *"   # 5分ごと
@@ -29,6 +30,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install system tzdata (for zoneinfo)
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
@@ -36,9 +42,16 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Restore auth_state.json
-        run: echo "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "${{ secrets.AUTH_STATE_B64 }}" | base64 -d > auth_state.json
+          ls -l auth_state.json
+          # 最低限の健全性チェック
+          [ -s auth_state.json ] || { echo "auth_state.json empty"; exit 1; }
+          head -c1 auth_state.json | grep -q '{' || { echo "auth_state.json not JSON"; exit 1; }
 
-       - name: Run checker (headless)
+      - name: Run checker (headless)
         timeout-minutes: 12
         env:
           PYTHONUNBUFFERED: "1"
