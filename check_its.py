@@ -364,6 +364,7 @@ def check_facility(page, name: str):
 
 def main():
     print("[DEBUG] main start", flush=True)
+    notify_line_api("🧪 [ITS] GitHub Actions からのテスト通知（届いたらOK）")
     with sync_playwright() as p:
         print("[DEBUG] playwright started", flush=True)
         # デバッグ中は headless=False のままでOK。常時運用は True 推奨。
@@ -433,4 +434,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    notify_line_api("[TEST] GitHub Actions からのLINE通知テストだよ！")
