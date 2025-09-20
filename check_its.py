@@ -375,18 +375,18 @@ def main():
         issues = []
 
         def run_one(name: str):
-            # ★各スレッドごとに新しいcontext/pageを作る（スレッド安全）
             ctx = browser.new_context(storage_state="auth_state.json")
             page = ctx.new_page()
             try:
                 print(f"[DEBUG] check start: {name}", flush=True)
-                r = check_facility(page, name)  # 既存の関数をそのまま利用
+                r = check_facility(page, name)
                 print(f"[DEBUG] check end: {name}", flush=True)
                 return r
             except Exception as e:
                 print(f"[ERROR] {name} check failed: {e}", flush=True)
                 return {"name": name, "available": None, "reason": "exception", "shot": None}
             finally:
+                # page/contextのcloseは race condition の原因なので「握りつぶす」
                 try:
                     page.close()
                 except Exception:
@@ -396,17 +396,18 @@ def main():
                 except Exception:
                     pass
 
-        # 施設数ぶん並列実行
         with ThreadPoolExecutor(max_workers=len(FACILITIES)) as ex:
             futures = [ex.submit(run_one, n) for n in FACILITIES]
             for fut in as_completed(futures):
-                results.append(fut.result())
+                try:
+                    results.append(fut.result())
+                except Exception as e:
+                    print(f"[ERROR] future failed: {e}", flush=True)
 
-        # ブラウザは最後に1回クローズ
         browser.close()
     print("[DEBUG] main end", flush=True)
 
-    # ---- 結果の整理 ----
+    # ---- 以下は前回と同じ通知ロジック ----
     current = {}
     for r in results:
         if r["available"] is None:
@@ -414,7 +415,6 @@ def main():
         else:
             current[r["name"]] = bool(r["available"])
 
-    # ---- 通知ロジック（既存そのまま）----
     if not DIFF_NOTIFY:
         lines = [f"{k}: {'○' if v else '×'}" for k, v in current.items() if v]
         if lines:
@@ -447,6 +447,5 @@ def main():
     if issues:
         msg = "[ITS] チェック異常\n" + "\n".join([f"{n}: {r}" for n, r in issues])
         notify_line_api(msg)
-        
 if __name__ == "__main__":
     main()
