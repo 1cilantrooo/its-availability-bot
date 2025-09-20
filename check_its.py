@@ -364,60 +364,76 @@ def check_facility(page, name: str):
 
 def main():
     print("[DEBUG] main start", flush=True)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     with sync_playwright() as p:
         print("[DEBUG] playwright started", flush=True)
-        # デバッグ中は headless=False のままでOK。常時運用は True 推奨。
         browser = p.chromium.launch(headless=True, slow_mo=0)
         print("[DEBUG] browser launched", flush=True)
-        context = browser.new_context(storage_state="auth_state.json")
-        print("[DEBUG] context created", flush=True)
-        page = context.new_page()
-        print("[DEBUG] new page created", flush=True)
 
-        current = {}   # {facility_name: True/False}
-        issues  = []   # セッション切れ/選択失敗など
+        results = []
+        issues = []
 
-        for name in FACILITIES:
-            print(f"[DEBUG] check start: {name}", flush=True)
+        def run_one(name: str):
+            # ★各スレッドごとに新しいcontext/pageを作る（スレッド安全）
+            ctx = browser.new_context(storage_state="auth_state.json")
+            page = ctx.new_page()
             try:
-                result = check_facility(page, name)
-                if result["available"] is None:
-                    issues.append((name, result["reason"]))
-                else:
-                    current[name] = bool(result["available"])
+                print(f"[DEBUG] check start: {name}", flush=True)
+                r = check_facility(page, name)  # 既存の関数をそのまま利用
+                print(f"[DEBUG] check end: {name}", flush=True)
+                return r
             except Exception as e:
                 print(f"[ERROR] {name} check failed: {e}", flush=True)
-            print(f"[DEBUG] check end: {name}", flush=True)
+                return {"name": name, "available": None, "reason": "exception", "shot": None}
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
 
-        context.close()
+        # 施設数ぶん並列実行
+        with ThreadPoolExecutor(max_workers=len(FACILITIES)) as ex:
+            futures = [ex.submit(run_one, n) for n in FACILITIES]
+            for fut in as_completed(futures):
+                results.append(fut.result())
+
+        # ブラウザは最後に1回クローズ
         browser.close()
     print("[DEBUG] main end", flush=True)
 
-    # ---- 差分通知 or 逐次通知 ----
+    # ---- 結果の整理 ----
+    current = {}
+    for r in results:
+        if r["available"] is None:
+            issues.append((r["name"], r["reason"]))
+        else:
+            current[r["name"]] = bool(r["available"])
+
+    # ---- 通知ロジック（既存そのまま）----
     if not DIFF_NOTIFY:
-        # 従来動作：空きがあった施設を毎回通知
-        lines = [f"{k}: {'○' if v else '×'}" for k,v in current.items() if v]
+        lines = [f"{k}: {'○' if v else '×'}" for k, v in current.items() if v]
         if lines:
             notify_line_api("[ITS] 空きあり\n" + "\n".join(lines) + f"\n{CALENDAR_URL}")
         else:
             print("[ITS] 今回は空き検知なし（逐次通知OFF）")
         return
 
-    # 差分比較
     last = load_last_state()
-    changes = []  # (name, before, after)
+    changes = []
     for k, v_now in current.items():
         v_before = last.get(k)
         if v_before is None:
-            # 初回は「状態登録のみ」で通知しない（うるさくしない）
             continue
         if bool(v_now) != bool(v_before):
             changes.append((k, bool(v_before), bool(v_now)))
 
-    # 状態保存（次回比較用）
     save_state(current)
 
-    # 変化があったものだけ通知
     if changes:
         lines = []
         for name, before, after in changes:
@@ -427,9 +443,10 @@ def main():
         notify_line_api(msg)
     else:
         print("[ITS] 状態変化なし（通知なし）")
+
     if issues:
         msg = "[ITS] チェック異常\n" + "\n".join([f"{n}: {r}" for n, r in issues])
         notify_line_api(msg)
-
+        
 if __name__ == "__main__":
     main()
