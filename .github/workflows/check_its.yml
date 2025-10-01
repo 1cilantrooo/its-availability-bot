@@ -71,3 +71,12 @@ jobs:
               git push
             fi
           fi
+      - name: Upload debug artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: |
+            dumps/*
+            hits/*
+          if-no-files-found: ignore
