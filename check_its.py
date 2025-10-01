@@ -22,7 +22,7 @@ TARGET_MONTHS = {9, 10}
 POSITIVE_MARKS = ["◎", "○", "△", "空き", "予約可"]
 
 # ===== 通知まわり・運用オプション =====
-DIFF_NOTIFY = True                   # True=変化があった施設だけ通知
+DIFF_NOTIFY =  False                # True=変化があった施設だけ通知
 STATE_FILE = "last_state.json"       # 前回結果の保存先
 CAPTURE_HIT_SCREENSHOT = True        # ヒット時にスクショ保存
 SHOT_DIR = "hits"                    # スクショ保存ディレクトリ
@@ -449,3 +449,4 @@ def main():
         notify_line_api(msg)
 if __name__ == "__main__":
     main()
+    notify_line_api("[TEST] GitHub Actions からの LINE 通知テスト")
