@@ -4,6 +4,8 @@ from utils import notify_line_api
 import os, json, re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo  # Python 3.11+
+DEBUG_DUMP_HTML = True
+DUMP_DIR = "dumps"
 
 # 共通のカレンダー入口URL（あなたが貼ってくれたもの）
 CALENDAR_URL = "https://as.its-kenpo.or.jp/apply/empty_calendar?s=PWdqTjMwRFpwWlNaMUpIZDlrSGR3MVda"
@@ -59,22 +61,44 @@ def visible_tab(page):
     # display:none じゃないタブ（=今表示されてる施設パネル）
     return page.locator('.tabContent .tabConBody:not([style*="display:none"])').first
 
+# 追加で上の方に置いてOK
+POSITIVE_SIGNS = {"◎", "○", "◯", "△", "▲"}   # ← 丸(全角/異体字)も追加
+POSITIVE_WORDS = {"空き", "予約可", "空室", "空有", "受付中"}
+
 def has_availability_in_container(root) -> bool:
     """
     表示中の施設パネル(root)のカレンダーだけを対象に空き判定。
-    説明文や凡例の○/△は無視する。
+    文字・クラス・imgのalt/titleまで総当たりで見る。
     """
-    # まずはクラス判定（サイト実装に合わせてクラス名を追加OK）
-    if root.locator(".tb-calendar td.empty, .tb-calendar td.a_little").count() > 0:
+    # 1) クラス名（施設によって微妙に違う想定を広めにカバー）
+    cls_hits = root.locator(
+        ".tb-calendar td.empty, .tb-calendar td.a_little, "
+        ".tb-calendar td.ok, .tb-calendar td.available, .tb-calendar td.vacant"
+    )
+    if cls_hits.count() > 0:
         return True
 
-    # セル単位の文字判定（カレンダー表に限定）
-    cells = root.locator(".tb-calendar td")   # ← ここがポイント
-    cnt = cells.count()
-    for i in range(cnt):
+    # 2) セル内テキスト（◯/△や“予約可”など）
+    cells = root.locator(".tb-calendar td")
+    n = cells.count()
+    for i in range(n):
         try:
-            txt = cells.nth(i).inner_text(timeout=200)
-            if "◎" in txt or "○" in txt or "△" in txt:
+            txt = (cells.nth(i).inner_text(timeout=200) or "").strip()
+            if any(s in txt for s in POSITIVE_SIGNS) or any(w in txt for w in POSITIVE_WORDS):
+                return True
+        except Exception:
+            pass
+
+    # 3) 画像の alt / title（○画像を使っている場合）
+    imgs = root.locator(".tb-calendar td img")
+    m = imgs.count()
+    for i in range(m):
+        try:
+            alt = imgs.nth(i).get_attribute("alt") or ""
+            title = imgs.nth(i).get_attribute("title") or ""
+            if any(s in alt for s in POSITIVE_SIGNS) or any(s in title for s in POSITIVE_SIGNS):
+                return True
+            if any(w in alt for w in POSITIVE_WORDS) or any(w in title for w in POSITIVE_WORDS):
                 return True
         except Exception:
             pass
@@ -346,6 +370,23 @@ def check_facility(page, name: str):
     root = page.locator(tcas)
 
     available = has_availability_in_container(root)
+
+# デバッグ: ブルーベリーヒル勝浦で未検知だったらHTMLとスクショを保存
+    if (not available) and ("ブルーベリーヒル勝浦" in name) and DEBUG_DUMP_HTML:
+        try:
+            os.makedirs(DUMP_DIR, exist_ok=True)
+            ts = datetime.now(TZ_JP).strftime("%Y%m%d_%H%M%S")
+            safe = re.sub(r'[\\/:*?"<>| ]+', "_", name)
+            html_path = os.path.join(DUMP_DIR, f"dump_{safe}_{ts}.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(root.inner_html(timeout=2000) or "")
+            # スクショも取る
+            shot_path2 = os.path.join(DUMP_DIR, f"shot_{safe}_{ts}.png")
+            page.screenshot(path=shot_path2, full_page=True)
+            print(f"[DEBUG] dump saved: {html_path} / {shot_path2}", flush=True)
+        except Exception as e:
+            print(f"[WARN] debug dump failed: {e}", flush=True)
+
     shot_path = None
     if available and CAPTURE_HIT_SCREENSHOT:
         os.makedirs(SHOT_DIR, exist_ok=True)
