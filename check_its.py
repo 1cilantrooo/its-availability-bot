@@ -488,6 +488,3 @@ def main():
     if issues:
         msg = "[ITS] チェック異常\n" + "\n".join([f"{n}: {r}" for n, r in issues])
         notify_line_api(msg)
-if __name__ == "__main__":
-    main()
-    notify_line_api("[TEST] GitHub Actions からの LINE 通知テスト")
