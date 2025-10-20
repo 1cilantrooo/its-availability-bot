@@ -20,8 +20,10 @@ FACILITIES = [
 # 監視する月（ページ内に「9月」「10月」が見える状態まで送る）
 TARGET_MONTHS = {9, 10}
 
-# “空きあり”の判定に使う文字
-POSITIVE_MARKS = ["◎", "○", "△", "空き", "予約可"]
+# “空きあり”の判定に使う文字（○ と ◯ の両方）
+POSITIVE_MARKS = ["◎", "○", "◯", "△", "空き", "予約可"]
+# ← 丸(全角/異体字)も追加
+POSITIVE_WORDS = {"空き", "予約可", "空室", "空有", "受付中"}
 
 # ===== 通知まわり・運用オプション =====
 DIFF_NOTIFY =  False                # True=変化があった施設だけ通知
@@ -61,12 +63,10 @@ def visible_tab(page):
     # display:none じゃないタブ（=今表示されてる施設パネル）
     return page.locator('.tabContent .tabConBody:not([style*="display:none"])').first
 
-# 追加で上の方に置いてOK
-POSITIVE_MARKS = ["◎", "○", "◯", "△", "空き", "予約可"]
-   # ← 丸(全角/異体字)も追加
-POSITIVE_WORDS = {"空き", "予約可", "空室", "空有", "受付中"}
+
 
 def has_availability_in_container(root) -> bool:
+    
     """
     表示中の施設パネル(root)のカレンダーだけを対象に空き判定。
     説明文や凡例の○/△/◯は無視する。
@@ -87,6 +87,21 @@ def has_availability_in_container(root) -> bool:
         return True
 
     return False
+
+def _availability_counters(root) -> dict:
+    """デバッグ用: 何個ヒットしてるか数える（.tb-calendar 内だけ）"""
+    d = {}
+    d["class_empty"]    = root.locator(".tb-calendar td.empty").count()
+    d["class_a_little"] = root.locator(".tb-calendar td.a_little").count()
+    d["text_◎"]        = root.locator(".tb-calendar td", has_text="◎").count()
+    d["text_○"]        = root.locator(".tb-calendar td", has_text="○").count()
+    d["text_◯"]        = root.locator(".tb-calendar td", has_text="◯").count()
+    d["text_△"]        = root.locator(".tb-calendar td", has_text="△").count()
+    d["img_alt_title"]  = root.locator(
+        '.tb-calendar td img[alt*="◎"], .tb-calendar td img[alt*="○"], .tb-calendar td img[alt*="◯"], .tb-calendar td img[alt*="△"], '
+        '.tb-calendar td img[title*="◎"], .tb-calendar td img[title*="○"], .tb-calendar td img[title*="◯"], .tb-calendar td img[title*="△"]'
+    ).count()
+    return d
 
 def try_click_update(page) -> None:
     """施設を選んだ後に押しがちなボタンを順に試す。"""
@@ -354,8 +369,11 @@ def check_facility(page, name: str):
 
     available = has_availability_in_container(root)
 
-# デバッグ: ブルーベリーヒル勝浦で未検知だったらHTMLとスクショを保存
-    if (not available) and ("ブルーベリーヒル勝浦" in name) and DEBUG_DUMP_HTML:
+# --- デバッグ出力（全施設対象） ---
+    counters = _availability_counters(root)
+
+    # 空きが無かったときに DOM とスクショを保存（1回だけでOKなら DEBUG_DUMP_HTML を True のまま）
+    if (not available) and DEBUG_DUMP_HTML:
         try:
             os.makedirs(DUMP_DIR, exist_ok=True)
             ts = datetime.now(TZ_JP).strftime("%Y%m%d_%H%M%S")
@@ -363,28 +381,15 @@ def check_facility(page, name: str):
             html_path = os.path.join(DUMP_DIR, f"dump_{safe}_{ts}.html")
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(root.inner_html(timeout=2000) or "")
-            # スクショも取る
+            # 画面全体スクショ
             shot_path2 = os.path.join(DUMP_DIR, f"shot_{safe}_{ts}.png")
             page.screenshot(path=shot_path2, full_page=True)
             print(f"[DEBUG] dump saved: {html_path} / {shot_path2}", flush=True)
         except Exception as e:
             print(f"[WARN] debug dump failed: {e}", flush=True)
 
-    shot_path = None
-    if available and CAPTURE_HIT_SCREENSHOT:
-        os.makedirs(SHOT_DIR, exist_ok=True)
-        ts = datetime.now(TZ_JP).strftime("%Y%m%d_%H%M%S")
-        safe = re.sub(r'[\\/:*?"<>| ]+', "_", name)
-        shot_path = os.path.join(SHOT_DIR, f"hit_{safe}_{ts}.png")
-        try:
-            page.screenshot(path=shot_path, full_page=True)
-            print(f"[DEBUG] screenshot saved: {shot_path}", flush=True)
-        except Exception as e:
-            print(f"[WARN] screenshot failed: {e}", flush=True)
-
-    print(f"[DEBUG] facility done: {name}", flush=True)
-    return {"name": name, "available": available, "reason": None, "shot": shot_path}
-
+    # 一時的にカウンタをLINEへ（要らなくなったらコメントアウト）
+    # notify_line_api(f"[ITS:debug] {name}\n{counters}")
 
 def main():
     print("[DEBUG] main start", flush=True)
