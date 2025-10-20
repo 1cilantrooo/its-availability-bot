@@ -62,46 +62,29 @@ def visible_tab(page):
     return page.locator('.tabContent .tabConBody:not([style*="display:none"])').first
 
 # 追加で上の方に置いてOK
-POSITIVE_SIGNS = {"◎", "○", "◯", "△", "▲"}   # ← 丸(全角/異体字)も追加
+POSITIVE_MARKS = ["◎", "○", "◯", "△", "空き", "予約可"]
+   # ← 丸(全角/異体字)も追加
 POSITIVE_WORDS = {"空き", "予約可", "空室", "空有", "受付中"}
 
 def has_availability_in_container(root) -> bool:
     """
     表示中の施設パネル(root)のカレンダーだけを対象に空き判定。
-    文字・クラス・imgのalt/titleまで総当たりで見る。
+    説明文や凡例の○/△/◯は無視する。
     """
-    # 1) クラス名（施設によって微妙に違う想定を広めにカバー）
-    cls_hits = root.locator(
-        ".tb-calendar td.empty, .tb-calendar td.a_little, "
-        ".tb-calendar td.ok, .tb-calendar td.available, .tb-calendar td.vacant"
-    )
-    if cls_hits.count() > 0:
+    # 1) クラス判定（サイト実装に合わせてクラス名を追加OK）
+    if root.locator(".tb-calendar td.empty, .tb-calendar td.a_little").count() > 0:
         return True
 
-    # 2) セル内テキスト（◯/△や“予約可”など）
+    # 2) セルのテキストに記号が含まれるか（◯ と ○ の両方）
     cells = root.locator(".tb-calendar td")
-    n = cells.count()
-    for i in range(n):
-        try:
-            txt = (cells.nth(i).inner_text(timeout=200) or "").strip()
-            if any(s in txt for s in POSITIVE_SIGNS) or any(w in txt for w in POSITIVE_WORDS):
-                return True
-        except Exception:
-            pass
+    if cells.filter(has_text="◎").count() > 0: return True
+    if cells.filter(has_text="○").count() > 0: return True
+    if cells.filter(has_text="◯").count() > 0: return True
+    if cells.filter(has_text="△").count() > 0: return True
 
-    # 3) 画像の alt / title（○画像を使っている場合）
-    imgs = root.locator(".tb-calendar td img")
-    m = imgs.count()
-    for i in range(m):
-        try:
-            alt = imgs.nth(i).get_attribute("alt") or ""
-            title = imgs.nth(i).get_attribute("title") or ""
-            if any(s in alt for s in POSITIVE_SIGNS) or any(s in title for s in POSITIVE_SIGNS):
-                return True
-            if any(w in alt for w in POSITIVE_WORDS) or any(w in title for w in POSITIVE_WORDS):
-                return True
-        except Exception:
-            pass
+    # 3) 画像の alt で丸や三角を出しているパターン
+    if root.locator('.tb-calendar td img[alt*="◎"], .tb-calendar td img[alt*="○"], .tb-calendar td img[alt*="◯"], .tb-calendar td img[alt*="△"]').count() > 0:
+        return True
 
     return False
 
